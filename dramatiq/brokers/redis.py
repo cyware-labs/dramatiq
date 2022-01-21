@@ -26,7 +26,7 @@ from uuid import uuid4
 import redis
 
 from ..broker import Broker, Consumer, MessageProxy
-from ..common import compute_backoff, current_millis, dq_name, getenv_int
+from ..common import compute_backoff, current_millis, dq_name
 from ..errors import ConnectionClosed, QueueJoinTimeout
 from ..logging import get_logger
 from ..message import Message
@@ -45,10 +45,6 @@ DEFAULT_DEAD_MESSAGE_TTL = 86400000 * 7
 #: The amount of time in milliseconds that has to pass without a
 #: heartbeat for a worker to be considered offline.
 DEFAULT_HEARTBEAT_TIMEOUT = 60000
-
-#: A hint for the max lua stack size. The broker discovers this value
-#: the first time it's run, but it may be overwritten using this var.
-DEFAULT_LUA_MAX_STACK = getenv_int("dramatiq_lua_max_stack")
 
 
 class RedisBroker(Broker):
@@ -82,7 +78,7 @@ class RedisBroker(Broker):
       requeue_deadline(int): Deprecated.  Does nothing.
       requeue_interval(int): Deprecated.  Does nothing.
       client(redis.StrictRedis): A redis client to use.
-      **parameters: Connection parameters are passed directly
+      **parameters(dict): Connection parameters are passed directly
         to :class:`redis.Redis`.
 
     .. _Redis: http://redis-py.readthedocs.io/en/latest/#redis.Redis
@@ -122,7 +118,7 @@ class RedisBroker(Broker):
     def consumer_class(self):
         return _RedisConsumer
 
-    def consume(self, queue_name, prefetch=1, timeout=5000):
+    def consume(self, queue_name, prefetch=1, timeout=5000, enable_auto_commit=True, poll_timeout=1, bulk_fetch=1):
         """Create a new consumer for a queue.
 
         Parameters:
@@ -211,6 +207,9 @@ class RedisBroker(Broker):
         for queue_name in self.queues:
             self.flush(queue_name)
 
+    def killself(self):
+        pass
+
     def join(self, queue_name, *, interval=100, timeout=None):
         """Wait for all the messages on the given queue to be
         processed.  This method is only meant to be used in tests to
@@ -254,11 +253,7 @@ class RedisBroker(Broker):
         if cls._max_unpack_size_val is None:
             with cls._max_unpack_size_mut:
                 if cls._max_unpack_size_val is None:
-                    cls._max_unpack_size_val = DEFAULT_LUA_MAX_STACK or self.scripts["maxstack"]()
-                    # We only want to use half of the max LUA stack to unpack values to avoid having
-                    # problems with multiple workers + great number of messages
-                    # See https://github.com/Bogdanp/dramatiq/issues/433
-                    cls._max_unpack_size_val = cls._max_unpack_size_val // 2
+                    cls._max_unpack_size_val = self.scripts["maxstack"]()
         return cls._max_unpack_size_val
 
     def _dispatch(self, command):
@@ -316,7 +311,8 @@ class _RedisConsumer(Consumer):
         except redis.ConnectionError as e:
             raise ConnectionClosed(e) from None
         finally:
-            self.queued_message_ids.discard(message.message_id)
+            if message.message_id in self.queued_message_ids:
+                self.queued_message_ids.remove(message.message_id)
 
     def nack(self, message):
         try:
@@ -325,7 +321,8 @@ class _RedisConsumer(Consumer):
         except redis.ConnectionError as e:
             raise ConnectionClosed(e) from None
         finally:
-            self.queued_message_ids.discard(message.message_id)
+            if message.message_id in self.queued_message_ids:
+                self.queued_message_ids.remove(message.message_id)
 
     def requeue(self, messages):
         message_ids = [message.options["redis_message_id"] for message in messages]
@@ -334,6 +331,9 @@ class _RedisConsumer(Consumer):
 
         self.logger.debug("Re-enqueueing %r on queue %r.", message_ids, self.queue_name)
         self.broker.do_requeue(self.queue_name, *message_ids)
+
+    def killself(self):
+        pass
 
     def __next__(self):
         try:

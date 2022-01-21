@@ -40,7 +40,7 @@ class StubBroker(Broker):
         """
         return [message for messages in self.dead_letters_by_queue.values() for message in messages]
 
-    def consume(self, queue_name, prefetch=1, timeout=100):
+    def consume(self, queue_name, prefetch=1, timeout=100, enable_auto_commit=True, poll_timeout=1, bulk_fetch=1):
         """Create a new consumer for a queue.
 
         Parameters:
@@ -61,7 +61,7 @@ class StubBroker(Broker):
                 timeout,
             )
         except KeyError:
-            raise QueueNotFound(queue_name) from None
+            raise QueueNotFound(queue_name) # noqa
 
     def declare_queue(self, queue_name):
         """Declare a queue.  Has no effect if a queue with the given
@@ -128,6 +128,9 @@ class StubBroker(Broker):
 
         self.dead_letters_by_queue.clear()
 
+    def killself(self):
+        pass
+
     # TODO: Make fail_fast default to True.
     def join(self, queue_name, *, fail_fast=False, timeout=None):
         """Wait for all the messages on the given queue to be
@@ -153,7 +156,7 @@ class StubBroker(Broker):
                 self.queues[dq_name(queue_name)],
             ]
         except KeyError:
-            raise QueueNotFound(queue_name) from None
+            raise QueueNotFound(queue_name) # noqa
 
         deadline = timeout and time.monotonic() + timeout / 1000
         while True:
@@ -187,6 +190,9 @@ class _StubConsumer(Consumer):
     def nack(self, message):
         self.queue.task_done()
         self.dead_letters.append(message)
+
+    def killself(self):
+        pass
 
     def __next__(self):
         try:

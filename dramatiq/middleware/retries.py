@@ -63,7 +63,7 @@ class Retries(Middleware):
         precedence over `max_retries` when set.
     """
 
-    def __init__(self, *, max_retries=20, min_backoff=None, max_backoff=None, retry_when=None):
+    def __init__(self, *, max_retries=0, min_backoff=None, max_backoff=None, retry_when=None):
         self.logger = get_logger(__name__, type(self))
         self.max_retries = max_retries
         self.min_backoff = min_backoff or DEFAULT_MIN_BACKOFF
@@ -92,23 +92,22 @@ class Retries(Middleware):
             return
 
         retries = message.options.setdefault("retries", 0)
-
-        message.options["retries"] += 1
-        message.options["traceback"] = traceback.format_exc(limit=30)
-
         max_retries = message.options.get("max_retries") or actor.options.get("max_retries", self.max_retries)
         retry_when = actor.options.get("retry_when", self.retry_when)
+        message.options["traceback"] = traceback.format_exc(limit=30)
         if retry_when is not None and not retry_when(retries, exception) or \
            retry_when is None and max_retries is not None and retries >= max_retries:
             self.logger.warning("Retries exceeded for message %r.", message.message_id)
             message.fail()
             return
 
+        message.options["retries"] += 1
+
         if isinstance(exception, Retry) and exception.delay is not None:
             delay = exception.delay
         else:
-            min_backoff = message.options.get("min_backoff", actor.options.get("min_backoff", self.min_backoff))
-            max_backoff = message.options.get("max_backoff", actor.options.get("max_backoff", self.max_backoff))
+            min_backoff = message.options.get("min_backoff") or actor.options.get("min_backoff", self.min_backoff)
+            max_backoff = message.options.get("max_backoff") or actor.options.get("max_backoff", self.max_backoff)
             max_backoff = min(max_backoff, DEFAULT_MAX_BACKOFF)
             _, delay = compute_backoff(retries, factor=min_backoff, max_backoff=max_backoff)
 

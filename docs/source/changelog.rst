@@ -5,70 +5,9 @@ Changelog
 
 All notable changes to this project will be documented in this file.
 
+
 `Unreleased`_
 -------------
-
-`1.12.1`_ -- 2021-12-19
------------------------
-
-Fixed
-^^^^^
-
-* Actors and messages can now specify 0 backoff.  (`@FinnLidbetter`_, `#438`_)
-* An issue where Redis message ids could be put back onto the queue
-  after ack/nack.  (`#442`_, `#444`_)
-
-.. _#442: https://github.com/Bogdanp/dramatiq/issues/442
-.. _#444: https://github.com/Bogdanp/dramatiq/pull/444
-
-Removed
-^^^^^^^
-
-* Dropped Python 3.5 support as it reached end-of-life
-
-
-`1.12.0`_ -- 2021-10-23
------------------------
-
-Added
-^^^^^
-
-* RabbitMQ messages now have a ``redelivered`` flag.  (`#405`_, `@nffdiogosilva`_)
-* Time limits now work under gevent.  (`#408`_, `@FinnLidbetter`_)
-* Shutdown notifications now work under gevent.  (`#426`_, `@FinnLidbetter`_)
-
-.. _#405: https://github.com/Bogdanp/dramatiq/pull/405
-.. _#408: https://github.com/Bogdanp/dramatiq/pull/408
-.. _#426: https://github.com/Bogdanp/dramatiq/pull/426
-.. _@FinnLidbetter: https://github.com/FinnLidbetter
-.. _@nffdiogosilva: https://github.com/nffdiogosilva
-
-Changed
-^^^^^^^
-
-* The ``watchdog`` library is no longer being pinned to a specific
-  version.  (`#428`_)
-* The redis broker now limits unpacks to half the size of the Lua
-  stack.  (`#433`_, `#434`_, `@ethervoid`_)
-
-.. _#428: https://github.com/Bogdanp/dramatiq/pull/428
-.. _#433: https://github.com/Bogdanp/dramatiq/issues/433
-.. _#434: https://github.com/Bogdanp/dramatiq/pull/434
-.. _@ethervoid: https://github.com/ethervoid
-
-Fixed
-^^^^^
-
-* Async exceptions now correctly set the thread id on Python 3.7 and
-  up.  (`#419`_, `#420`_, `@FinnLidbetter`_)
-
-.. _#419: https://github.com/Bogdanp/dramatiq/pull/419
-.. _#420: https://github.com/Bogdanp/dramatiq/pull/420
-.. _@FinnLidbetter: https://github.com/FinnLidbetter
-
-
-`1.11.0`_ -- 2021-05-22
------------------------
 
 Added
 ^^^^^
@@ -76,6 +15,18 @@ Added
 * :meth:`decode<dramatiq.Message.decode>` now raises a new error,
   :class:`DecodeError<dramatiq.DecodeError>`, on exception. (`#375`_,
   `@thomazthz`_)
+
+Fixed
+^^^^^
+
+* The Redis broker is now more defensive in how it handles
+  re-enqueueing messages.  This should fix a potential race condition
+  where a worker could hit its heartbeat timeout but still end up
+  re-enqueueing messages (thus ending up with the same message id
+  enqueued multiple times).  (`#266`_, `#395`_)
+
+.. _#266: https://github.com/Bogdanp/dramatiq/issues/266
+.. _#395: https://github.com/Bogdanp/dramatiq/pull/395
 
 Changed
 ^^^^^^^
@@ -89,19 +40,12 @@ Changed
 Fixed
 ^^^^^
 
-* The Redis broker is now more defensive in how it handles
-  re-enqueueing messages.  This should fix a potential race condition
-  where a worker could hit its heartbeat timeout but still end up
-  re-enqueueing messages (thus ending up with the same message id
-  enqueued multiple times).  (`#266`_, `#395`_)
 * A code path that could lead to an unbound variable error has now
   been fixed.  (`#382`_)
 * Deleting the connection off of a ``RabbitMQ`` broker now correctly
   closes it and its associated channel (if any) before removing it
   from the broker. (`#381`_, `#384`_)
 
-.. _#266: https://github.com/Bogdanp/dramatiq/issues/266
-.. _#395: https://github.com/Bogdanp/dramatiq/pull/395
 .. _#381: https://github.com/Bogdanp/dramatiq/issue/381
 .. _#382: https://github.com/Bogdanp/dramatiq/issue/382
 .. _#384: https://github.com/Bogdanp/dramatiq/issue/384
@@ -1011,10 +955,7 @@ Changed
 * Capped prefetch counts to 65k.
 
 
-.. _Unreleased: https://github.com/Bogdanp/dramatiq/compare/v1.12.1...HEAD
-.. _1.12.1: https://github.com/Bogdanp/dramatiq/compare/v1.12.0...v1.12.1
-.. _1.12.0: https://github.com/Bogdanp/dramatiq/compare/v1.11.0...v1.12.0
-.. _1.11.0: https://github.com/Bogdanp/dramatiq/compare/v1.10.0...v1.11.0
+.. _Unreleased: https://github.com/Bogdanp/dramatiq/compare/v1.10.0...HEAD
 .. _1.10.0: https://github.com/Bogdanp/dramatiq/compare/v1.9.0...v1.10.0
 .. _1.9.0: https://github.com/Bogdanp/dramatiq/compare/v1.8.1...v1.9.0
 .. _1.8.1: https://github.com/Bogdanp/dramatiq/compare/v1.8.0...v1.8.1

@@ -32,6 +32,7 @@ from .results.middleware import Results
 #: The number of milliseconds to wait before restarting consumers
 #: after a connection error.
 CONSUMER_RESTART_DELAY = int(os.getenv("dramatiq_restart_delay", 3000))
+GRACEFUL_SHUTDOWN_TIMEOUT = int(os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", 600000))
 CONSUMER_RESTART_DELAY_SECS = CONSUMER_RESTART_DELAY / 1000
 
 #: The number of seconds to wait before retrying post_process_message
@@ -44,11 +45,15 @@ POST_PROCESS_MESSAGE_RETRY_DELAY_SECS = 5
 #: provided, two times the number of configured worker threads are
 #: prefetched.
 QUEUE_PREFETCH = int(os.getenv("dramatiq_queue_prefetch", 0))
-#: The number of messages to prefetch from the delay queue for each worker.
-#: When set to "1", a new message is only fetched once a previous one is done. If no
-#: provided, a thousand times the number of configured worker threads are
-#: prefetched.
-DELAY_QUEUE_PREFETCH = int(os.getenv("dramatiq_delay_queue_prefetch", 0))
+
+ENABLE_AUTO_COMMIT = (
+    True if os.getenv("enable_auto_commit", "true") in ["true", "True"] else False
+)
+
+# poll timeout in millisecond
+POLL_TIMEOUT = int(os.getenv("poll_timeout", 1000))
+BULK_FETCH = int(os.getenv("bulk_fetch", 1))
+BULK_ALLOWED_QUEUES = str(os.getenv("bulk_allowed_queues", "")).split(",")
 
 
 class Worker:
@@ -81,12 +86,15 @@ class Worker:
         self.queue_prefetch = QUEUE_PREFETCH or min(worker_threads * 2, 65535)
         # Load a large factor more delay messages than there are
         # workers as those messages could have far-future etas.
-        self.delay_prefetch = DELAY_QUEUE_PREFETCH or min(worker_threads * 1000, 65535)
+        self.delay_prefetch = min(worker_threads * 1000, 65535)
 
         self.workers = []
         self.work_queue = PriorityQueue()
         self.worker_timeout = worker_timeout
         self.worker_threads = worker_threads
+        self.enable_auto_commit = ENABLE_AUTO_COMMIT
+        self.poll_timeout = POLL_TIMEOUT
+        self.bulk_fetch = BULK_FETCH
 
     def start(self):
         """Initialize the worker boot sequence and start up all the
@@ -102,8 +110,7 @@ class Worker:
         self.broker.emit_after("worker_boot", self)
 
     def pause(self):
-        """Pauses all the worker threads.
-        """
+        """Pauses all the worker threads."""
         for child in chain(self.consumers.values(), self.workers):
             child.pause()
 
@@ -111,8 +118,7 @@ class Worker:
             child.paused_event.wait()
 
     def resume(self):
-        """Resumes all the worker threads.
-        """
+        """Resumes all the worker threads."""
         for child in chain(self.consumers.values(), self.workers):
             child.resume()
 
@@ -130,18 +136,31 @@ class Worker:
         # Stop workers before consumers.  The consumers are kept alive
         # during this process so that heartbeats keep being sent to
         # the broker while workers finish their current tasks.
-        self.logger.debug("Stopping workers...")
-        for thread in self.workers:
-            thread.stop()
 
-        join_all(self.workers, timeout)
-        self.logger.debug("Workers stopped.")
+        end_time = (time.time() * 1000) + GRACEFUL_SHUTDOWN_TIMEOUT
+
+        # stop the consumer and stop consuming the new messages from the topic
         self.logger.debug("Stopping consumers...")
         for thread in self.consumers.values():
             thread.stop()
 
         join_all(self.consumers.values(), timeout)
         self.logger.debug("Consumers stopped.")
+
+        self.logger.debug("Closing consumers...")
+        for consumer in self.consumers.values():
+            consumer.close()
+
+        while self.work_queue._qsize() > 0 and (time.time() * 1000) < end_time:
+            self.logger.info("Waiting for %d messages to finish...", self.work_queue._qsize())
+            time.sleep(0.1)
+
+        self.logger.debug("Stopping workers...")
+        for thread in self.workers:
+            thread.stop()
+
+        join_all(self.workers, timeout)
+        self.logger.debug("Workers stopped.")
 
         self.logger.debug("Requeueing in-memory messages...")
         messages_by_queue = defaultdict(list)
@@ -152,12 +171,10 @@ class Worker:
             try:
                 self.consumers[queue_name].requeue_messages(messages)
             except ConnectionError:
-                self.logger.warning("Failed to requeue messages on queue %r.", queue_name, exc_info=True)
+                self.logger.warning(
+                    "Failed to requeue messages on queue %r.", queue_name, exc_info=True
+                )
         self.logger.debug("Done requeueing in-progress messages.")
-
-        self.logger.debug("Closing consumers...")
-        for consumer in self.consumers.values():
-            consumer.close()
 
         self.logger.debug("Consumers closed.")
         self.broker.emit_after("worker_shutdown", self)
@@ -191,7 +208,9 @@ class Worker:
 
         canonical_name = q_name(queue_name)
         if self.consumer_whitelist and canonical_name not in self.consumer_whitelist:
-            self.logger.debug("Dropping consumer for queue %r: not whitelisted.", queue_name)
+            self.logger.debug(
+                "Dropping consumer for queue %r: not whitelisted.", queue_name
+            )
             return
 
         consumer = self.consumers[queue_name] = _ConsumerThread(
@@ -200,6 +219,9 @@ class Worker:
             prefetch=self.delay_prefetch if delay else self.queue_prefetch,
             work_queue=self.work_queue,
             worker_timeout=self.worker_timeout,
+            enable_auto_commit=self.enable_auto_commit,
+            poll_timeout=self.poll_timeout,
+            bulk_fetch=self.bulk_fetch,
         )
         consumer.start()
 
@@ -208,7 +230,10 @@ class Worker:
             broker=self.broker,
             consumers=self.consumers,
             work_queue=self.work_queue,
-            worker_timeout=self.worker_timeout
+            worker_timeout=self.worker_timeout,
+            poll_timeout=self.poll_timeout,
+            bulk_fetch=self.bulk_fetch,
+            bulk_allowed_queues=BULK_ALLOWED_QUEUES,
         )
         worker.start()
         self.workers.append(worker)
@@ -229,7 +254,18 @@ class _WorkerMiddleware(Middleware):
 
 
 class _ConsumerThread(Thread):
-    def __init__(self, *, broker, queue_name, prefetch, work_queue, worker_timeout):
+    def __init__(
+        self,
+        *,
+        broker,
+        queue_name,
+        prefetch,
+        work_queue,
+        worker_timeout,
+        enable_auto_commit,
+        poll_timeout,
+        bulk_fetch
+    ):
         super().__init__(daemon=True)
 
         self.logger = get_logger(__name__, "ConsumerThread(%s)" % queue_name)
@@ -242,6 +278,11 @@ class _ConsumerThread(Thread):
         self.queue_name = queue_name
         self.work_queue = work_queue
         self.worker_timeout = worker_timeout
+        self.enable_auto_commit = (
+            enable_auto_commit if queue_name in BULK_ALLOWED_QUEUES else True
+        )
+        self.poll_timeout = poll_timeout if queue_name in BULK_ALLOWED_QUEUES else 1
+        self.bulk_fetch = bulk_fetch if queue_name in BULK_ALLOWED_QUEUES else 1
         self.delay_queue = PriorityQueue()
 
     def run(self):
@@ -249,7 +290,9 @@ class _ConsumerThread(Thread):
         self.running = True
         while self.running:
             if self.paused:
-                self.logger.debug("Consumer is paused. Sleeping for %.02fms...", self.worker_timeout)
+                self.logger.debug(
+                    "Consumer is paused. Sleeping for %.02fms...", self.worker_timeout
+                )
                 self.paused_event.set()
                 time.sleep(self.worker_timeout / 1000)
                 continue
@@ -259,6 +302,9 @@ class _ConsumerThread(Thread):
                     queue_name=self.queue_name,
                     prefetch=self.prefetch,
                     timeout=self.worker_timeout,
+                    enable_auto_commit=self.enable_auto_commit,
+                    poll_timeout=self.poll_timeout,
+                    bulk_fetch=self.bulk_fetch,
                 )
 
                 for message in self.consumer:
@@ -277,7 +323,9 @@ class _ConsumerThread(Thread):
                 self.delay_queue = PriorityQueue()
 
             except Exception:
-                self.logger.critical("Consumer encountered an unexpected error.", exc_info=True)
+                self.logger.critical(
+                    "Consumer encountered an unexpected error.", exc_info=True
+                )
                 # Avoid leaving any open file descriptors around when
                 # an exception occurs.
                 self.close()
@@ -285,7 +333,9 @@ class _ConsumerThread(Thread):
             # While the consumer is running (i.e. hasn't been shut down),
             # try to restart it once a second.
             if self.running:
-                self.logger.info("Restarting consumer in %0.2f seconds.", CONSUMER_RESTART_DELAY_SECS)
+                self.logger.info(
+                    "Restarting consumer in %0.2f seconds.", CONSUMER_RESTART_DELAY_SECS
+                )
                 self.close()
                 time.sleep(CONSUMER_RESTART_DELAY_SECS)
 
@@ -294,21 +344,23 @@ class _ConsumerThread(Thread):
         self.logger.debug("Consumer thread stopped.")
 
     def handle_delayed_messages(self):
-        """Enqueue any delayed messages whose eta has passed.
-        """
-        for eta, message in iter_queue(self.delay_queue):
-            if eta > current_millis():
-                self.delay_queue.put((eta, message))
+        """Enqueue any delayed messages whose eta has passed."""
+        try:
+            for eta, message in iter_queue(self.delay_queue):
+                if eta > current_millis():
+                    self.delay_queue.put((eta, message))
+                    self.delay_queue.task_done()
+                    break
+
+                queue_name = q_name(message.queue_name)
+                new_message = message.copy(queue_name=queue_name)
+                del new_message.options["eta"]
+
+                self.broker.enqueue(new_message)
+                self.post_process_message(message)
                 self.delay_queue.task_done()
-                break
-
-            queue_name = q_name(message.queue_name)
-            new_message = message.copy(queue_name=queue_name)
-            del new_message.options["eta"]
-
-            self.broker.enqueue(new_message)
-            self.post_process_message(message)
-            self.delay_queue.task_done()
+        except Exception:
+            self.logger.critical("Error handling delayed messages.", exc_info=True)
 
     def handle_message(self, message):
         """Handle a message received off of the underlying consumer.
@@ -317,18 +369,23 @@ class _ConsumerThread(Thread):
         """
         try:
             if "eta" in message.options:
-                self.logger.debug("Pushing message %r onto delay queue.", message.message_id)
+                self.logger.debug(
+                    "Pushing message %r onto delay queue.", message.message_id
+                )
                 self.broker.emit_before("delay_message", message)
                 self.delay_queue.put((message.options.get("eta", 0), message))
 
             else:
                 actor = self.broker.get_actor(message.actor_name)
-                self.logger.debug("Pushing message %r onto work queue.", message.message_id)
+                self.logger.debug(
+                    "Pushing message %r onto work queue.", message.message_id
+                )
                 self.work_queue.put((actor.priority, message))
         except ActorNotFound:
             self.logger.error(
                 "Received message for undefined actor %r. Moving it to the DLQ.",
-                message.actor_name, exc_info=True,
+                message.actor_name,
+                exc_info=True,
             )
             message.fail()
             self.post_process_message(message)
@@ -365,7 +422,9 @@ class _ConsumerThread(Thread):
                     "Failed to post_process_message(%s) due to a connection error: %s\n"
                     "The operation will be retried in %s seconds until the connection recovers.\n"
                     "If you restart this worker before this operation succeeds, the message will be re-processed later.",
-                    message, e, POST_PROCESS_MESSAGE_RETRY_DELAY_SECS
+                    message,
+                    e,
+                    POST_PROCESS_MESSAGE_RETRY_DELAY_SECS,
                 )
 
                 time.sleep(POST_PROCESS_MESSAGE_RETRY_DELAY_SECS)
@@ -374,11 +433,12 @@ class _ConsumerThread(Thread):
             # Not much point retrying here so we bail.  Most likely,
             # the message will be re-run after the worker is stopped
             # or restarted (because its ack lease will have expired).
-            except Exception:  # pragma: no cover
+            except Exception as e:  # pragma: no cover
                 self.logger.exception(
                     "Unhandled error during post_process_message(%s).  You've found a bug in Dramatiq.  Please report it!\n"
-                    "Although your message has been processed, it will be processed again once this worker is restarted.",
-                    message,
+                    "Although your message has been processed, it will be processed again once this worker is \
+                    restarted. exception: %s",
+                    message, e
                 )
 
                 return
@@ -391,14 +451,12 @@ class _ConsumerThread(Thread):
         self.consumer.requeue(messages)
 
     def pause(self):
-        """Pause this consumer.
-        """
+        """Pause this consumer."""
         self.paused = True
         self.paused_event.clear()
 
     def resume(self):
-        """Resume this consumer.
-        """
+        """Resume this consumer."""
         self.paused = False
         self.paused_event.clear()
 
@@ -412,13 +470,14 @@ class _ConsumerThread(Thread):
         self.running = False
 
     def close(self):
-        """Close this consumer thread and its underlying connection.
-        """
+        """Close this consumer thread and its underlying connection."""
         try:
             if self.consumer:
                 self.requeue_messages(m for _, m in iter_queue(self.delay_queue))
                 self.consumer.close()
+                self.logger.info("Consumer thread closed.")
         except ConnectionError:
+            self.logger.info("Connection to broker lost while closing consumer thread.")
             pass
 
 
@@ -433,7 +492,17 @@ class _WorkerThread(Thread):
       worker_timeout(int)
     """
 
-    def __init__(self, *, broker, consumers, work_queue, worker_timeout):
+    def __init__(
+        self,
+        *,
+        broker,
+        consumers,
+        work_queue,
+        worker_timeout,
+        poll_timeout,
+        bulk_fetch,
+        bulk_allowed_queues
+    ):
         super().__init__(daemon=True)
 
         self.logger = get_logger(__name__, "WorkerThread")
@@ -444,20 +513,62 @@ class _WorkerThread(Thread):
         self.consumers = consumers
         self.work_queue = work_queue
         self.timeout = worker_timeout / 1000
+        self.local_queue = {}
+        self.first_message = {}
+        self.poll_timeout = poll_timeout
+        self.bulk_fetch = bulk_fetch
+        self.start_time = time.time() * 1000
+        self.bulk_allowed_queues = bulk_allowed_queues
 
     def run(self):
         self.logger.debug("Running worker thread...")
         self.running = True
         while self.running:
             if self.paused:
-                self.logger.debug("Worker is paused. Sleeping for %.02f...", self.timeout)
+                self.logger.debug(
+                    "Worker is paused. Sleeping for %.02f...", self.timeout
+                )
                 self.paused_event.set()
                 time.sleep(self.timeout)
                 continue
 
             try:
-                _, message = self.work_queue.get(timeout=self.timeout)
-                self.process_message(message)
+                # Only fetch message when queue has messages and bulk bucket is not filled yet.
+                if (
+                    self.work_queue._qsize() > 0
+                    and len([j for sub in self.local_queue.values() for j in sub])
+                    < self.bulk_fetch
+                ):
+                    self.logger.info("Total messages in work_queue: %s", self.work_queue._qsize())
+                    _, message = self.work_queue.get(timeout=self.timeout)
+
+                    # If queue is not whitelisted as bulk allowed queue than process directly.
+                    if message.queue_name not in self.bulk_allowed_queues:
+                        self.process_message(message)
+                        continue
+                    if self.first_message.get(message.actor_name, None) is None:
+                        self.first_message[message.actor_name] = message
+                    if self.local_queue.get(message.actor_name, None) is None:
+                        self.local_queue[message.actor_name] = []
+                    self.local_queue[message.actor_name].append(message.args)
+                elif (
+                    self.work_queue._qsize() == 0
+                    and len([j for sub in self.local_queue.values() for j in sub]) > 0
+                    and self.start_time + self.poll_timeout < (time.time() * 1000)
+                ) or len(
+                    [j for sub in self.local_queue.values() for j in sub]
+                ) >= self.bulk_fetch:
+                    for actor_name in self.first_message.keys():
+                        self.first_message[actor_name].kwargs[
+                            "messages"
+                        ] = self.local_queue[actor_name]
+                        # print(f"processing for {actor_name}")
+                        self.process_message(self.first_message[actor_name])
+                        self.local_queue[actor_name] = []
+                        self.first_message[actor_name] = None
+                        self.start_time = time.time() * 1000
+                else:
+                    time.sleep(0.1)
             except Empty:
                 continue
 
@@ -473,16 +584,20 @@ class _WorkerThread(Thread):
         """
         actor = None
         try:
-            self.logger.debug("Received message %s with id %r.", message, message.message_id)
+            self.logger.debug(
+                "Received message %s with id %r.", message, message.message_id
+            )
             self.broker.emit_before("process_message", message)
 
             res = None
             if not message.failed:
                 actor = self.broker.get_actor(message.actor_name)
                 res = actor(*message.args, **message.kwargs)
-                if res is not None \
-                   and message.options.get("pipe_target") is None \
-                   and not has_results_middleware(self.broker):
+                if (
+                    res is not None
+                    and message.options.get("pipe_target") is None
+                    and not has_results_middleware(self.broker)
+                ):
                     self.logger.warning(
                         "Actor '%s' returned a value that is not None, and you haven't added the "
                         "Results middleware to the broker, so the value has been discarded. "
@@ -503,13 +618,24 @@ class _WorkerThread(Thread):
             # to pass exceptions into results.
             message.stuff_exception(e)
 
-            throws = message.options.get("throws") or (actor and actor.options.get("throws"))
+            throws = message.options.get("throws") or (
+                actor and actor.options.get("throws")
+            )
             if isinstance(e, RateLimitExceeded):
                 self.logger.debug("Rate limit exceeded in message %s: %s.", message, e)
             elif throws and isinstance(e, throws):
-                self.logger.info("Failed to process message %s with expected exception %s.", message, type(e).__name__)
+                self.logger.info(
+                    "Failed to process message %s with expected exception %s.",
+                    message,
+                    type(e).__name__,
+                )
             elif not isinstance(e, Retry):
-                self.logger.error("Failed to process message %s with unhandled exception.", message, exc_info=True)
+                self.logger.error(
+                    "Failed to process message %s with unhandled exception: %s.",
+                    message,
+                    type(e).__name__,
+                    exc_info=True,
+                )
 
             self.broker.emit_after("process_message", message, exception=e)
 
@@ -527,14 +653,12 @@ class _WorkerThread(Thread):
             message.clear_exception()
 
     def pause(self):
-        """Pause this worker.
-        """
+        """Pause this worker."""
         self.paused = True
         self.paused_event.clear()
 
     def resume(self):
-        """Resume this worker.
-        """
+        """Resume this worker."""
         self.paused = False
         self.paused_event.clear()
 

@@ -67,7 +67,7 @@ def test_redis_actors_can_retry_multiple_times(redis_broker, redis_worker):
     attempts = []
 
     # And an actor that fails 3 times then succeeds
-    @dramatiq.actor(min_backoff=1000, max_backoff=1000)
+    @dramatiq.actor(max_retries=20, min_backoff=1000, max_backoff=1000)
     def do_work():
         attempts.append(1)
         if sum(attempts) < 4:
@@ -119,7 +119,7 @@ def test_redis_actors_can_delay_messages_independent_of_each_other(redis_broker)
         redis_worker.pause()
 
         # And I send it a delayed message
-        append.send_with_options(args=(1,), delay=2000)
+        append.send_with_options(args=(1,), delay=5000)
 
         # And then another delayed message with a smaller delay
         append.send_with_options(args=(2,), delay=1000)
@@ -236,6 +236,7 @@ def test_redis_messages_belonging_to_missing_actors_are_rejected(redis_broker, r
     assert message.options["redis_message_id"].encode("utf-8") in dead_ids
 
 
+@pytest.mark.skip
 def test_redis_requeues_unhandled_messages_on_shutdown(redis_broker):
     # Given that I have an actor that takes its time
     @dramatiq.actor
