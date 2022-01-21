@@ -54,12 +54,12 @@ class JSONEncoder(Encoder):
         try:
             data_str = data.decode("utf-8")
         except UnicodeDecodeError as e:
-            raise DecodeError("failed to decode data %r" % (data,), data, e) from None
+            raise DecodeError("failed to decode data %r" % (data,), data, e) # noqa
 
         try:
             return json.loads(data_str)
         except json.decoder.DecodeError as e:
-            raise DecodeError("failed to decode message %r" % (data_str,), data_str, e) from None
+            raise DecodeError("failed to decode message %r" % (data_str,), data_str, e) # noqa
 
 
 class PickleEncoder(Encoder):

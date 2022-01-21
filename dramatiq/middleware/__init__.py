@@ -18,7 +18,9 @@
 from .age_limit import AgeLimit
 from .callbacks import Callbacks
 from .current_message import CurrentMessage
+from .elastic_apm import ElasticAPM
 from .group_callbacks import GroupCallbacks
+from .kafka import Kafka
 from .middleware import Middleware, MiddlewareError, SkipMessage
 from .pipelines import Pipelines
 from .prometheus import Prometheus
@@ -29,19 +31,37 @@ from .time_limit import TimeLimit, TimeLimitExceeded
 
 __all__ = [
     # Basics
-    "Middleware", "MiddlewareError", "SkipMessage",
-
+    "Middleware",
+    "MiddlewareError",
+    "SkipMessage",
     # Threading
-    "Interrupt", "raise_thread_exception",
-
+    "Interrupt",
+    "raise_thread_exception",
     # Middlewares
-    "AgeLimit", "Callbacks", "CurrentMessage", "GroupCallbacks", "Pipelines", "Retries",
-    "Shutdown", "ShutdownNotifications", "TimeLimit", "TimeLimitExceeded",
+    "AgeLimit",
+    "Callbacks",
+    "CurrentMessage",
+    "GroupCallbacks",
+    "Pipelines",
+    "Retries",
+    "Shutdown",
+    "ShutdownNotifications",
+    "TimeLimit",
+    "TimeLimitExceeded",
     "Prometheus",
+    "Kafka",
+    "ElasticAPM",
 ]
 
 
 #: The list of middleware that are enabled by default.
 default_middleware = [
-    Prometheus, AgeLimit, TimeLimit, ShutdownNotifications, Callbacks, Pipelines, Retries
+    Kafka,
+    Prometheus,
+    AgeLimit,
+    TimeLimit,
+    ShutdownNotifications,
+    Callbacks,
+    Pipelines,
+    Retries,
 ]

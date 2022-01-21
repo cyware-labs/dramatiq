@@ -34,7 +34,7 @@ def test_broker_middleware_can_be_added_before_other_middleware(stub_broker):
     stub_broker.add_middleware(empty_middleware, before=Prometheus)
 
     # I expect it to be the first middleware
-    assert stub_broker.middleware[0] == empty_middleware
+    assert stub_broker.middleware[1] == empty_middleware
 
 
 @skip_on_windows
@@ -48,7 +48,7 @@ def test_broker_middleware_can_be_added_after_other_middleware(stub_broker):
     stub_broker.add_middleware(empty_middleware, after=Prometheus)
 
     # I expect it to be the second middleware
-    assert stub_broker.middleware[1] == empty_middleware
+    assert stub_broker.middleware[2] == empty_middleware
 
 
 def test_broker_middleware_can_fail_to_be_added_before_or_after_missing_middleware(stub_broker):

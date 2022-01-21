@@ -115,10 +115,8 @@ if do_maintenance == "1" then
         local dead_worker_queue_acks = dead_worker_acks .. "." .. queue_name
         local message_ids = redis.call("smembers", dead_worker_queue_acks)
         if next(message_ids) then
-            for _, message_id in ipairs(message_ids) do
-                if redis.call("hexists", queue_messages, message_id) > 0 then
-                    redis.call("rpush", queue_full_name, message_id)
-                end
+            for message_ids_batch in iter_chunks(message_ids) do
+                redis.call("rpush", queue_full_name, unpack(message_ids_batch))
             end
             redis.call("del", dead_worker_queue_acks)
         end
@@ -192,7 +190,7 @@ elseif command == "requeue" then
         local message_id = ARGS[i]
 
         if redis.call("srem", queue_acks, message_id) > 0 then
-            if redis.call("hexists", queue_messages, message_id) > 0 then
+            if redis.call("hexists", queue_messages, message_id) then
                 redis.call("rpush", queue_full_name, message_id)
             end
         end

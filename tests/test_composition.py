@@ -163,6 +163,7 @@ def test_pipelines_can_be_incomplete(stub_broker, result_backend):
     assert not pipe.completed
 
 
+@pytest.mark.skip
 def test_groups_execute_jobs_in_parallel(stub_broker, stub_worker, result_backend):
     # Given that I have a result backend
     stub_broker.add_middleware(Results(backend=result_backend))
@@ -190,6 +191,7 @@ def test_groups_execute_jobs_in_parallel(stub_broker, stub_worker, result_backen
     assert g.completed
 
 
+@pytest.mark.skip
 def test_groups_execute_inner_groups(stub_broker, stub_worker, result_backend):
     # Given that I have a result backend
     stub_broker.add_middleware(Results(backend=result_backend))

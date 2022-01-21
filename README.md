@@ -1,11 +1,14 @@
+# Cyware branch of Dramatiq
+
+## TODO
+
+* How to build
+* PyPI link
+* Kafka unit tests
+
+_Upstream README below this point_
+
 <img src="https://dramatiq.io/_static/logo.png" align="right" width="131" />
-
-# dramatiq
-
-[![Build Status](https://github.com/Bogdanp/dramatiq/workflows/CI/badge.svg)](https://github.com/Bogdanp/dramatiq/actions?query=workflow%3A%22CI%22)
-[![PyPI version](https://badge.fury.io/py/dramatiq.svg)](https://badge.fury.io/py/dramatiq)
-[![Documentation](https://img.shields.io/badge/doc-latest-brightgreen.svg)](http://dramatiq.io)
-[![Discuss](https://img.shields.io/badge/discuss-online-orange.svg)](https://groups.io/g/dramatiq-users)
 
 *A fast and reliable distributed task processing library for Python 3.*
 
@@ -20,7 +23,7 @@
 <h3 align="center">Sponsors</h3>
 
 <p align="center">
-  <a href="https://www.sendcloud.com/jobs/?utm_source=dramatiq.io&utm_medium=Banner&utm_campaign=Sponsored%20Banner&utm_content=V1" target="_blank">
+  <a href="https://www.sendcloud.com/?utm_source=dramatiq.io&utm_medium=Banner&utm_campaign=Sponsored%20Banner&utm_content=V1" target="_blank">
     <img width="222px" src="docs/source/_static/sendcloud-logo.png">
   </a>
 </p>
@@ -30,19 +33,22 @@
 
 If you want to use it with [RabbitMQ]
 
-    pip install 'dramatiq[rabbitmq, watch]'
+```bash
+pip install 'dramatiq[rabbitmq, watch]'
+```
 
 or if you want to use it with [Redis]
 
-    pip install 'dramatiq[redis, watch]'
-
+```bash
+pip install 'dramatiq[redis, watch]'
+```
 
 ## Quickstart
 
 Make sure you've got [RabbitMQ] running, then create a new file called
 `example.py`:
 
-``` python
+```python
 import dramatiq
 import requests
 import sys
@@ -78,8 +84,8 @@ dramatiq is licensed under the LGPL.  Please see [COPYING] and
 [COPYING.LESSER] for licensing details.
 
 
-[COPYING.LESSER]: https://github.com/Bogdanp/dramatiq/blob/master/COPYING.LESSER
-[COPYING]: https://github.com/Bogdanp/dramatiq/blob/master/COPYING
+[COPYING.LESSER]: https://bitbucket.org/cywarelabs/dramatiq/src/master/COPYING.LESSER
+[COPYING]: https://bitbucket.org/cywarelabs/dramatiq/src/master/COPYING
 [RabbitMQ]: https://www.rabbitmq.com/
 [Redis]: https://redis.io
 [user guide]: https://dramatiq.io/guide.html

@@ -41,13 +41,10 @@ with open(rel("dramatiq", "__init__.py"), "r") as f:
 
 dependencies = [
     "prometheus-client>=0.2",
+    "APScheduler>=3.7.0",
 ]
 
 extra_dependencies = {
-    "gevent": [
-        "gevent>=1.1",
-    ],
-
     "memcached": [
         "pylibmc>=1.5,<2.0",
     ],
@@ -57,13 +54,17 @@ extra_dependencies = {
     ],
 
     "redis": [
-        "redis>=2.0,<5.0",
+        "redis>=2.0,<4.0",
     ],
 
     "watch": [
-        "watchdog",
-        "watchdog_gevent",
+        "watchdog>=0.8,<0.9",
+        "watchdog_gevent==0.1",
     ],
+
+    "kafka": [
+        "kafka-python>=2.0.2"
+    ]
 }
 
 extra_dependencies["all"] = list(set(sum(extra_dependencies.values(), [])))
@@ -86,14 +87,14 @@ extra_dependencies["dev"] = extra_dependencies["all"] + [
     "wheel",
 
     # Testing
-    "pytest",
+    "pytest<4",
     "pytest-benchmark[histogram]",
     "pytest-cov",
     "tox",
 ]
 
 setup(
-    name="dramatiq",
+    name="cydramatiq",
     version=version,
     author="Bogdan Popa",
     author_email="bogdan@cleartype.io",
@@ -111,11 +112,12 @@ setup(
     ],
     include_package_data=True,
     install_requires=dependencies,
-    python_requires=">=3.6",
+    python_requires=">=3.5",
     extras_require=extra_dependencies,
     entry_points={"console_scripts": ["dramatiq = dramatiq.__main__:main"]},
     scripts=["bin/dramatiq-gevent"],
     classifiers=[
+        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",

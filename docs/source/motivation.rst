@@ -25,14 +25,9 @@ for you.
 Compared to *
 -------------
 
-.. note::
-   This section was last updated in 2019.  It's possible that various
-   bits of the table below are now outdated.  Clarifications in PR form
-   are always welcome!
-
 I've used Celery_ professionally for years and my growing frustration
 with it is one of the reasons why I developed dramatiq.  Here are some
-of the main differences between Dramatiq, Celery, Huey and RQ:
+of the main differences between Dramatiq, Celery and RQ:
 
 +------------------------------+----------+---------------+--------------+--------------+
 |                              | Dramatiq | Celery_       | Huey_        | RQ_          |
@@ -56,7 +51,7 @@ of the main differences between Dramatiq, Celery, Huey and RQ:
 |                              |          |               |              |              |
 +------------------------------+----------+---------------+--------------+--------------+
 | Task prioritization          | Yes      | No [#prio]_   | Yes          | No [#prio]_  |
-|                              | [#prio]_ |               |              |              |
+|                              |          |               |              |              |
 +------------------------------+----------+---------------+--------------+--------------+
 | Delayed tasks                | Yes      | Yes [#]_      | Yes          | No           |
 |                              |          |               |              |              |
@@ -103,10 +98,10 @@ of the main differences between Dramatiq, Celery, Huey and RQ:
           usage of runtime stack frame manipulation leads to
           heisenbugs.
 
-.. [#prio] Celery and RQ don't support task prioritization.  Dramatiq
-           supports global prioritization under RabbitMQ via the
-           ``broker_priority``.  It also provides worker-local
-           prioritization of prefetched messages.
+.. [#prio] Celery and RQ don't support task prioritization.  You have
+           to deploy multiple sets of workers in order to prioritize
+           queues.  Dramatiq lets you prioritize down to the
+           individual |Actor| level.
 
 .. [#cron] For cron-like scheduling functionality, you can combine
            Dramatiq with APScheduler_ or Periodiq_.

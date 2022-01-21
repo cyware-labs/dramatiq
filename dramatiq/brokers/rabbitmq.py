@@ -53,16 +53,6 @@ class RabbitmqBroker(Broker):
 
       >>> RabbitmqBroker(url="amqp://guest:guest@127.0.0.1:5672")
 
-      To support message priorities, provide a ``max_priority``...
-
-      >>> broker = RabbitmqBroker(url="...", max_priority=255)
-
-      ... then enqueue messages with the ``broker_priority`` option:
-
-      >>> broker.enqueue(an_actor.message_with_options(
-      ...    broker_priority=255,
-      ... ))
-
     See also:
       ConnectionParameters_ for a list of all the available connection
       parameters.
@@ -75,11 +65,11 @@ class RabbitmqBroker(Broker):
         and connection parameters are provided, the URL is used.
       middleware(list[Middleware]): The set of middleware that apply
         to this broker.
-      max_priority(int): Configure queues with ``x-max-priority`` to
-        support queue-global priority queueing.
+      max_priority(int): Configure the queues with x-max-priority to
+        support priority queue in RabbitMQ itself
       parameters(list[dict]): A sequence of (pika) connection parameters
         to determine which Rabbit server(s) to connect to.
-      **kwargs: The (pika) connection parameters to use to
+      **kwargs(dict): The (pika) connection parameters to use to
         determine which Rabbit server to connect to.
 
     .. _ConnectionParameters: https://pika.readthedocs.io/en/0.12.0/modules/parameters.html
@@ -205,7 +195,7 @@ class RabbitmqBroker(Broker):
                 self.logger.debug("Encountered an error while closing %r.", channel_or_conn, exc_info=True)
         self.logger.debug("Channels and connections closed.")
 
-    def consume(self, queue_name, prefetch=1, timeout=5000):
+    def consume(self, queue_name, prefetch=1, timeout=5000, enable_auto_commit=True, poll_timeout=1, bulk_fetch=1):
         """Create a new consumer for a queue.
 
         Parameters:
@@ -398,6 +388,9 @@ class RabbitmqBroker(Broker):
         for queue_name in self.queues:
             self.flush(queue_name)
 
+    def killself(self):
+        pass
+
     def join(self, queue_name, min_successes=10, idle_time=100, *, timeout=None):
         """Wait for all the messages on the given queue to be
         processed.  This method is only meant to be used in tests to
@@ -524,11 +517,7 @@ class _RabbitmqConsumer(Consumer):
             self._nack(method.delivery_tag)
             return None
 
-        rmq_message = _RabbitmqMessage(
-            method.redelivered,
-            method.delivery_tag,
-            message,
-        )
+        rmq_message = _RabbitmqMessage(method.delivery_tag, message)
         self.known_tags.add(method.delivery_tag)
         return rmq_message
 
@@ -557,10 +546,12 @@ class _RabbitmqConsumer(Consumer):
                 pika.exceptions.AMQPChannelError) as e:
             raise ConnectionClosed(e) from None
 
+    def killself(self):
+        pass
+
 
 class _RabbitmqMessage(MessageProxy):
-    def __init__(self, redelivered, tag, message):
+    def __init__(self, tag, message):
         super().__init__(message)
 
-        self.redelivered = redelivered
         self._tag = tag

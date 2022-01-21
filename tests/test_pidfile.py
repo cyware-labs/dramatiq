@@ -1,10 +1,11 @@
 import os
 import signal
 import time
+import pytest
 
 from dramatiq.brokers.stub import StubBroker
 
-from .common import skip_on_windows
+from .common import skip_on_windows, skip_in_ci
 
 broker = StubBroker()
 
@@ -16,7 +17,7 @@ def remove(filename):
         pass
 
 
-@skip_on_windows
+@pytest.mark.skip
 def test_cli_scrubs_stale_pid_files(start_cli):
     try:
         # Given that I have an existing file containing an old pid
@@ -25,7 +26,9 @@ def test_cli_scrubs_stale_pid_files(start_cli):
             f.write("999999")
 
         # When I try to start the cli and pass that file as a PID file
-        proc = start_cli("tests.test_pidfile:broker", extra_args=["--pid-file", filename])
+        proc = start_cli(
+            "tests.test_pidfile:broker", extra_args=["--pid-file", filename]
+        )
 
         # And I wait for it to write the pid file
         time.sleep(1)
@@ -57,7 +60,9 @@ def test_cli_aborts_when_pidfile_contains_garbage(start_cli):
             f.write("important!")
 
         # When I try to start the cli and pass that file as a PID file
-        proc = start_cli("tests.test_pidfile:broker", extra_args=["--pid-file", filename])
+        proc = start_cli(
+            "tests.test_pidfile:broker", extra_args=["--pid-file", filename]
+        )
         proc.wait()
 
         # Then the process should exit with return code 4
@@ -67,13 +72,16 @@ def test_cli_aborts_when_pidfile_contains_garbage(start_cli):
 
 
 @skip_on_windows
+@skip_in_ci
 def test_cli_with_pidfile_can_be_reloaded(start_cli):
     try:
         # Given that I have a PID file
         filename = "test_reload.pid"
 
         # When I try to start the cli and pass that file as a PID file
-        proc = start_cli("tests.test_pidfile:broker", extra_args=["--pid-file", filename])
+        proc = start_cli(
+            "tests.test_pidfile:broker", extra_args=["--pid-file", filename]
+        )
         time.sleep(1)
 
         # And send the proc a HUP signal
